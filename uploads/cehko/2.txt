@@ -110,8 +110,382 @@ if (BarDate() > BarDate(-1-Interval+1) && flagMsgDay == 0 && (BarTime() < AsTime
 	flagMsgDay = 1;
 }
 
+
 if ((BarTime() >= AsTime(10, 20, 0)) || (BarTime() <= AsTime(9, 55, 0)))
 {
 	flagMsgDay = 0;
 	flagMsgWeek = 0;
-	flaÿ
+	flagMsgMonth = 0;
+}
+
+//проверяем можно ли запускаться (Настала ли Offset свеча внутри Interval свечей)
+if (Interval>0 && Offset>0 && Offset<=Interval)
+	if ((CurrentIndex % Interval)+1 != Offset) return;
+
+
+// временное условие не торгуем от 10:00 до 10:20
+if ( (BarTime() < AsTime(10, 20, 0)) && (BarTime() > AsTime(9, 55, 0)) ) return;
+
+// временное условие не торгуем в субботу и воскресенье
+int day = ((int)DateTime.Now.DayOfWeek == 0) ? 7 : (int)DateTime.Now.DayOfWeek;
+if (IsTestMode == false && day >= 6) return;
+
+// временное условие не торгуем в самом начале суток, в боевом режиме проскальзывают сделки на 12:00
+DateTime dt1 = new DateTime(DateTime.Now.Year, DateTime.Now.Month, DateTime.Now.Day, 11, 57, 0);
+DateTime dt2 = new DateTime(DateTime.Now.Year, DateTime.Now.Month, DateTime.Now.Day, 12, 3, 0);
+if (IsTestMode == false && DateTime.Now >= dt1 && DateTime.Now <= dt2) return;
+
+//GetSignalInfo(SignalType signalType, int quantityFromEnd = 0) – возврат сигналов заданного типа, 
+//суммарный объем которых не превышает заданное количество (если quantityFromEnd отлично от нуля)
+var signal = GetSignalInfo(lastSignalId);
+
+//если заявка отправлялась роботом но по каким то причинам не ушла на биржу, то тут вернутся предыдущие показатели
+if (signal != null && xNewPos >0 && xNewPrice >0)
+{
+	xNewPos = signal.OperationSize;
+	xNewPrice = signal.PriceOfSignal;
+}
+
+//GetActiveOrders() – запрос списка активных заявок по роботу.
+var activeOrder = GetActiveOrders().FirstOrDefault(ao => ao.SignalId == lastSignalId);
+
+//разница дат текущей и закрытия свели чи в днях (для вывода в лог и телеграм)
+double daysDiff = TimeSpan.FromTicks(Math.Abs(DateTime.Now.Ticks-BarDate().Add(BarTime()).Ticks)).TotalDays;
+
+// Цена закрытия текущего бара из финансового ряда Input1
+double price = Input1.Close[0]; 
+
+double currBid = GetBid();
+double currAsk = GetAsk();
+
+//иногда на выходных создавались заявки с 0 ценой, проверяем и выходим
+if (price ==0 || currBid ==0 || currAsk ==0) return;
+
+//CurrentPosition() – возвращение объем текущей позиции (штук), которые посчитаны по сделкам только данной стратегии (робота). 
+//Положительное количество – показывает объем позиции лонг, отрицательное количество – объем позиции шорт.
+double pos = CurrentPosition();
+
+//После 18:00 не шортим и закрываем открытые шорты
+/*if ( (BarTime() > AsTime(18, 00, 0)) || (BarTime() <= AsTime(9, 55, 0)))
+{
+    if (pos<0) {
+	price = currAsk;
+
+	CloseShortLimit(price); //закрываем по лимитной
+    ClosePrices[ClosePrices.Count-1] = price;
+   	if (UseLog>0 && pos<0) LogData ("#_"+ticker+"_: "+"\U0001F4C9 Закрываем шорт (конец дня)"+((daysDiff>1)?( String.Format(" от {0:dd.MM.yyyy} {1}",BarDate(),BarTime()) ):(""))+": "+pos.ToString()+" шт. по "+price.ToString()+" руб.",Name); 
+   	GridIsClosing = true;
+   	return;
+  }
+  if (OrderDirection == 1) return;//Стратегия шорт не работает до утра нового дня
+  if (xNewDirection == -1) xNewDirection = 1;  
+}//*/
+
+
+//если перезапустили робота с ненулевой позицией робот должен подхватить сделку как первую в сетке
+if (!GridIsOpen && Math.Abs(pos)>0)
+{
+GridIsOpen = true;
+GridIsClosing =  false;
+xNewPos = Math.Abs(pos);
+xPosition = Math.Abs(pos);
+xNewPrice = GetPosition().Price;
+xCount = 1;
+xDepo = GetCurrencyPosition(RazdelGroupType.MICEX);
+xSL = BB(Input1.Сlose, BB_Period, BB_N).GetValue("Middle", 0) - BB(Input1.Сlose, BB_Period, BB_N).GetValue("Lower", 0);
+xStartLot = Math.Abs(pos);
+}
+
+
+//GetSignalInfo(SignalType signalType, int quantityFromEnd = 0) – возврат сигналов заданного типа, 
+//суммарный объем которых не превышает заданное количество (если quantityFromEnd отлично от нуля)
+var signals = GetSignalInfo(SignalType.All);
+
+
+
+///IsStatusFilled – исполнена ли заявка по сигналу
+if(activeOrder != null && activeOrder.IsStatusFilled && Math.Abs(pos) < xPosition)
+{
+	if (!LimitFlag && activeOrder.OrderDirection.ToString() == "Buy"){
+		LimitFlag = true;
+		if (UseLog>0) LogData ("#_"+ticker+"_: "+"Ожидается исполнение лимитной покупки "+((daysDiff>1)?( String.Format(" от {0:dd.MM.yyyy} {1}",BarDate(),BarTime()) ):(""))+": "+xNewPos.ToString()+" шт. по "+xNewPrice.ToString()+" руб.",Name); 
+    }
+    if (!LimitFlag && activeOrder.OrderDirection.ToString() == "Sell"){
+		LimitFlag = true;
+		if (UseLog>0) LogData ("#_"+ticker+"_: "+"Ожидается исполнение лимитной продажи"+((daysDiff>1)?( String.Format(" от {0:dd.MM.yyyy} {1}",BarDate(),BarTime()) ):(""))+": "+xNewPos.ToString()+" шт. по "+xNewPrice.ToString()+" руб.",Name); 
+    }
+    //if (activeOrder.OrderDirection == OrderDirection.Sell) return;//ждём сделки на закрытие сетки
+	//даем возможность роботу проверять дальше
+	//в случае, если не вся заявка исполнена возможно закроется по TP без учета неисполненной заявки
+}
+
+
+//Выводим информацию о заработанном, если необходимо
+double rplac = RealizedPLAfterCommission();
+
+if (RobotProfit != rplac) 
+{
+    double profit = rplac-RobotProfit;
+    //разница дат текущей и закрытия свечи
+    double daysDiffFromStart = TimeSpan.FromTicks(Math.Abs(BarDate().Add(BarTime()).Ticks-GridStart.Ticks)).TotalDays;
+    if (daysDiffFromStart > daysDiffFromMonth) daysDiffFromMonth = daysDiffFromStart;
+
+    RobotProfit = rplac;
+    RobotProfitDay += profit;
+    RobotProfitWeek += profit;
+    RobotProfitMonth += profit;
+
+    if (UseLog>0) LogData ("#_"+ticker+"_: "+"\U0001F4B0 заработано: "+RobotProfit.ToString("F2")+" руб. (+"+profit.ToString("F2")+((daysDiffFromStart>1)?( " за "+Convert.ToInt32(daysDiffFromStart).ToString()+" д." ):(""))+")*",Name);
+}
+
+
+//если сетка закрыта
+if(activeOrder == null && pos ==0)
+{
+ 	GridIsOpen = false;
+ 	GridIsClosing = false;
+    xNewPos = 0;
+	xNewPrice = 0;
+    xStartLot = 0;
+    xSL = 0;
+    xDepo = 0;
+	
+	MarginFlag = false;
+	LimitFlag = false;
+    
+    xNewDirection = GetPatternSignal(); //получаем направление для будущего сигнала
+}
+
+
+
+
+
+// *****************************************
+// *****************************************
+// *****************************************
+// *****************************************
+// *****************************************
+// Правило 1. Если первый запуск и робот не проинициализирован, покупаем StartLot
+// или расчетный по риску лот, смотря что больше
+// если нет позиций и сетка еще не начиналась - начинаем
+
+if (!GridIsOpen && pos ==0 && xNewDirection != 0)
+{
+  var NewSL = BB(Input1.Сlose, BB_Period, BB_N).GetValue("Middle", 0) - BB(Input1.Сlose, BB_Period, BB_N).GetValue("Lower", 0);
+  var NewTP = NewSL / RiskProfit;
+  var money = GetCurrencyPosition(RazdelGroupType.MICEX);  
+  var riskMoney = money/100.0*Risk;
+  var NewLot = riskMoney / NewSL;
+  //если получилось число не кратное LotSize() - делаем кратным
+  if (NewLot%LotSize() != 0)
+    {
+    NewLot = NewLot - NewLot%LotSize() + LotSize();    
+    }
+  if (NewLot < StartLot) NewLot = StartLot;
+  
+  
+  //LotSize() – функция возврата количества акций в лоте по инструменту торгового ряда, используемому в стратегии.
+  if (NewLot%LotSize() != 0)
+        {
+            ShowMessage("#_"+ticker+"_: "+" -> "+"NewLot не кратно "+LotSize().ToString()+". Робот остановлен!");
+            Stop();
+        }
+    
+    
+  if (Math.Abs(pos) + NewLot > Math.Abs(LongLimit))
+  {
+    ShowMessage("#_"+ticker+"_: "+" -> "+"Нельзя купить так много на первом шаге. Робот остановлен!");
+        Stop();
+  } 
+  if (Math.Abs(pos) + NewLot > Math.Abs(ShortLimit))
+  {
+    ShowMessage("#_"+ticker+"_: "+" -> "+"Нельзя продать так много на первом шаге. Робот остановлен!");
+        Stop();
+  }  
+  
+  
+  
+  
+  //если вдруг денег не хватает на покупку (проверка на маржинальную торговлю) а покупку совершить надо
+  if (IsTestMode == false && NewLot*price>money && Math.Abs(pos) + NewLot <= (xNewDirection == 1 ? LongLimit : Math.Abs(ShortLimit)))
+  {
+  
+	if (!MarginFlag)//сообщение выводится только 1 раз
+	{
+		MarginFlag = true;
+		double InitialLot0 = NewLot;
+	  	if (UseLog>0) LogData ("#_"+ticker+"_: "+"\U00002757 Внимание "+((daysDiff>1)?( String.Format(" от {0:dd.MM.yyyy} {1}",BarDate(),BarTime()) ):(""))+": Риск непокрытой позиции после исполнения заявки на "+((xNewDirection == 1)?("покупку "):("продажу "))+InitialLot0.ToString()+" шт. по "+price.ToString()+" руб.",Name); 
+	}
+  	return;
+  }
+    
+  //начинаем новую сетку, меняем флаг 
+  GridIsOpen = true;  
+  GridIsClosing = false;
+  MarginFlag = false;
+        
+  double InitialLot = NewLot;
+  
+  xPosition = Math.Abs(pos)+InitialLot; //запоминаем сколько должно стать позиций после выхода из лонг/шорт
+  
+  //и заходим в лонг/шорт
+  //EnterLong() – закрыть текущий шорт по рыночным ценам (если он есть) и открыть позицию лонг на разрешенное стратегией количество. 
+  //EnterLong(InitialLot);
+  if (xNewDirection ==  1) {
+    price = currAsk;
+    EnterLongLimit(price* (1.0 + 0.01 * OrderSlippage), InitialLot); //входим в лонг лимит
+    BreakingStop(NewSL,NewTP, SignalPriceType.DeltaFromAveragePrice); //ставим стоп лосс
+  }
+  if (xNewDirection == -1) {
+    price = currBid;
+    EnterShortLimit(price* (1.0 + 0.01 * OrderSlippage), InitialLot); //входим в шорт лимит
+    BreakingStop(NewSL,NewTP, SignalPriceType.DeltaFromAveragePrice); //ставим стоп лосс
+  }
+  
+	
+  var lastSignal = GetLastSignalInfo();
+  if(lastSignal != null)
+  {
+     lastSignalId = lastSignal.SignalID;
+  }
+  
+  //LogData (ticker+" -> "+String.Format("{0:dd.MM.yyyy} {1}",BarDate(),BarTime())+" Вход в лонг [уровень = 1; цена = "+price.ToString()+"; позиций = "+InitialLot.ToString()+"]",Name);
+  if (UseLog>0 && xNewDirection ==  1) LogData ("#_"+ticker+"_: "+"\U0001F4C9 Покупка \\[1]"+((daysDiff>1)?( String.Format(" от {0:dd.MM.yyyy} {1}",BarDate(),BarTime()) ):(""))+": "+InitialLot.ToString()+" шт. по "+price.ToString()+" руб."+((NewSL>0)?(" (SL: "+NewSL.ToString()+")"):("")),Name); 
+  if (UseLog>0 && xNewDirection == -1) LogData ("#_"+ticker+"_: "+"\U0001F4C8 Продажа \\[1]"+((daysDiff>1)?( String.Format(" от {0:dd.MM.yyyy} {1}",BarDate(),BarTime()) ):(""))+": "+InitialLot.ToString()+" шт. по "+price.ToString()+" руб."+((NewSL>0)?(" (SL: "+NewSL.ToString()+")"):("")),Name); 
+  
+  GridStart = BarDate().Add(BarTime());
+  //LogData(GridStart.ToString(),Name);
+  
+  //запоминаем цену открытия и размер позиции в штуках
+  xNewPos = InitialLot;
+  xStartLot = InitialLot;
+  xNewPrice = price;
+  xCount = 1;  
+  xDepo = money;
+  xSL = NewSL;
+  return;
+}
+
+
+
+// *****************************************
+// *****************************************
+// *****************************************
+// *****************************************
+// *****************************************
+// Правило 2. Если цена идет в благоприятную сторону, двигаем SL за ценой
+
+if (MoveSL>0)
+{
+
+    price = pos>0 ? currBid : currAsk;
+
+    //проверяем лонг
+    if (pos>0 && price > xNewPrice){
+    CancelStopLoss(); //снимаем старый стоп лосс
+    BreakingStop(price-xSL,price+xSL/RiskProfit, SignalPriceType.Price); //ставим новый стоп лосс
+    if (UseLog>0) LogData ("#_"+ticker+"_: "+"\U0001F4C8 Передвигаем SL"+((daysDiff>1)?( String.Format(" от {0:dd.MM.yyyy} {1}",BarDate(),BarTime()) ):(""))+": на "+(price-xSL).ToString()+" руб.",Name); 
+    }
+    
+    //проверяем шорт
+    if (pos<0 && price < xNewPrice){
+    CancelStopLoss(); //снимаем старый стоп лосс
+    BreakingStop(price+xSL,price-xSL/RiskProfit, SignalPriceType.Price); //ставим новый стоп лосс
+    if (UseLog>0) LogData ("#_"+ticker+"_: "+"\U0001F4C9 Передвигаем SL"+((daysDiff>1)?( String.Format(" от {0:dd.MM.yyyy} {1}",BarDate(),BarTime()) ):(""))+": на "+(price+xSL).ToString()+" руб.",Name);
+    }
+}
+//позиция сама закроется по стопу или тейку
+
+
+
+
+// *****************************************
+// *****************************************
+// *****************************************
+// *****************************************
+// *****************************************
+// Правило 3. Если цена идет в НЕблагоприятную сторону, усредняем и пересчитываем риски
+// снизилась больше чем на RBO рублей от последней цены то усредняемся (докупаем) с коэффициентом PSM
+
+//Если цена снизилась больше чем на RBO рублей от последней цены и все отложенные ордеры исполнены
+//Либо цена снизилась более чем на RBO_Percent % от последней цены и все отложенные ордеры исполнены
+
+double rangeBetweenOrders = 0;
+price = pos>0 ? currBid : currAsk;
+
+if ((RBO_Percent>0) && (price >0) && (xNewPrice>0) && (xNewPrice*RBO_Percent*0.01 > rangeBetweenOrders))
+	rangeBetweenOrders = xNewPrice*RBO_Percent*0.01;	
+    
+if ((xNewPrice - price>=rangeBetweenOrders && pos >0)||(price - xNewPrice>=rangeBetweenOrders && pos <0))
+{
+    //считаем новый лот с заданным коэффициентом мультипликации
+  double NewLot = Math.Abs(pos)*PSM+xStartLot-Math.Abs(pos);
+  //если получилось число не кратное LotSize() - делаем кратным
+  if (NewLot%LotSize() != 0)
+    {
+    NewLot = NewLot - NewLot%LotSize() + LotSize();    
+    }
+
+    var money = GetCurrencyPosition(RazdelGroupType.MICEX);
+  //если вдруг денег не хватает на покупку (проверка на маржинальную торговлю) а покупку совершить надо
+  if (IsTestMode == false && NewLot*price>money && Math.Abs(pos) + NewLot <= (pos > 0 ? LongLimit : Math.Abs(ShortLimit)))
+  {
+  
+	if (!MarginFlag)//сообщение выводится только 1 раз
+	{
+		MarginFlag = true;
+	  	if (UseLog>0 && pos > 0) LogData ("#_"+ticker+"_: "+"\U00002757 Внимание "+((daysDiff>1)?( String.Format(" от {0:dd.MM.yyyy} {1}",BarDate(),BarTime()) ):(""))+": Риск непокрытой позиции после исполнения заявки на покупку "+NewLot.ToString()+" шт. по "+price.ToString()+" руб.",Name); 
+        if (UseLog>0 && pos < 0) LogData ("#_"+ticker+"_: "+"\U00002757 Внимание "+((daysDiff>1)?( String.Format(" от {0:dd.MM.yyyy} {1}",BarDate(),BarTime()) ):(""))+": Риск непокрытой позиции после исполнения заявки на продажу "+NewLot.ToString()+" шт. по "+price.ToString()+" руб.",Name);
+	}
+  	return;
+  }
+  
+  //если хватает свободных денег то входим в сделку
+  if (calcPosition + NewLot <= (pos > 0  ? LongLimit : Math.Abs(ShortLimit)))
+  {     
+	xPosition = Math.Abs(pos)+NewLot; //запоминаем сколько должно стать позиций после выхода из лонг
+    
+    var newPrice = (AverPrice()*Math.Abs(pos)+price*NewLot)/(Math.Abs(pos)+NewLot);
+    var riskMoney = xDepo/100.0*Risk;
+    var NewSL = riskMoney / (Math.Abs(pos)+NewLot);
+    var NewTP = NewSL / RiskProfit;   
+	
+    //если все норм, то заходим в лонг
+    //EnterLong() – закрыть текущий шорт по рыночным ценам (если он есть) и открыть позицию лонг на разрешенное стратегией количество. 
+    //EnterLong(NewLot);
+    if (pos >0) {
+        EnterLongLimit(price* (1.0 + 0.01 * OrderSlippage), NewLot);
+        CancelStopLoss(); //снимаем старый стоп лосс
+        BreakingStop(NewSL,NewTP, SignalPriceType.DeltaFromAveragePrice); //ставим новый стоп лосс
+    }
+    if (pos <0) {
+        EnterShortLimit(price* (1.0 + 0.01 * OrderSlippage), NewLot);
+        CancelStopLoss(); //снимаем старый стоп лосс
+        BreakingStop(NewSL,NewTP, SignalPriceType.DeltaFromAveragePrice); //ставим новый стоп лосс
+    }
+    
+	
+    var lastSignal = GetLastSignalInfo();
+    if(lastSignal != null)
+    {
+       lastSignalId = lastSignal.SignalID;
+    }
+    if (UseLog>0 && pos > 0) LogData ("#_"+ticker+"_: "+"\U0001F4C9 Покупка \\["+(xCount+1).ToString()+"]"+((daysDiff>1)?( String.Format(" от {0:dd.MM.yyyy} {1}",BarDate(),BarTime()) ):(""))+": "+NewLot.ToString()+" шт. по "+price.ToString()+" руб."+((NewSL>0)?(" (SL: "+NewSL.ToString()+")"):("")),Name); 
+    if (UseLog>0 && pos < 0) LogData ("#_"+ticker+"_: "+"\U0001F4C8 Продажа \\["+(xCount+1).ToString()+"]"+((daysDiff>1)?( String.Format(" от {0:dd.MM.yyyy} {1}",BarDate(),BarTime()) ):(""))+": "+NewLot.ToString()+" шт. по "+price.ToString()+" руб."+((NewSL>0)?(" (SL: "+NewSL.ToString()+")"):("")),Name); 
+        
+    //запоминаем цену открытия и размер позиции в штуках
+    GridIsClosing = false;
+	xNewPos = NewLot;
+	xNewPrice = price;
+    xSL = NewSL;
+	xCount++;
+	
+	MarginFlag = false;
+	LimitFlag = false;
+  }
+}
+
+
+	
+}
+
