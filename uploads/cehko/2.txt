@@ -1,9 +1,11 @@
+function Initialize()
 {
 
   StrategyName = "MADRID-Alfa v2.0";
   AddInput("Input1", Inputs.Candle, 1, true, "");
 
   AddGlobalVariable("GridIsOpen", Types.Boolean, false); //флаг закрытия сетки
+  AddGlobalVariable("GridIsClosing", Types.Boolean, false); //флаг начала закрытия сетки
   AddGlobalVariable("MarginFlag", Types.Boolean, false); //флаг для сообщения о маржинальной торговле
   AddGlobalVariable("LimitFlag", Types.Boolean, false); //флаг для сообщения об открытой заявке ожидающей исполнения
   AddGlobalVariable("RobotProfit", Types.Double, 0); //Прибыль с момента запуска
@@ -117,7 +119,7 @@ if (Offset <=0) Offset = 1;
 
 //Статистика работы выводится в начале месяца
 if (BarDate().Month != BarDate(-1-Interval+1).Month && flagMsgMonth == 0 && (BarTime() < AsTime(10, 20, 0)) && (BarTime() > AsTime(9, 55, 0))){
-	if (UseLog>0) LogData ("#_"+ticker+"_: "+"\U0001F4B8 За месяц заработано: *"+RobotProfitMonth.ToString("F2")+" руб.*"+((daysDiffFromMonth > 5)?(", находились в просадке max \U000026A1 *"+Convert.ToInt32(daysDiffFromMonth).ToString()+" дней* \U000026A1"):("")),Name);
+	if (UseLog>0) LogData ("#_"+ticker+"_: "+"\U0001F4B8 За месяц заработано: "+RobotProfitMonth.ToString("F2")+" руб.*"+((daysDiffFromMonth > 5)?(", находились в просадке max \U000026A1 *"+Convert.ToInt32(daysDiffFromMonth).ToString()+" дней* \U000026A1"):("")),Name);
 	RobotProfitMonth = 0;
 	daysDiffFromMonth = 0;
 	flagMsgMonth = 1;
@@ -127,7 +129,7 @@ if (BarDate().Month != BarDate(-1-Interval+1).Month && flagMsgMonth == 0 && (Bar
 else
 //Статистика работы выводится в начале недели
 if (BarDate().DayOfWeek < BarDate(-1-Interval+1).DayOfWeek && flagMsgWeek == 0 && (BarTime() < AsTime(10, 20, 0)) && (BarTime() > AsTime(9, 55, 0))){
-	if (UseLog>0) LogData ("#_"+ticker+"_: "+"\U0001F4B8 За неделю заработано: *"+RobotProfitWeek.ToString("F2")+" руб.*",Name);
+	if (UseLog>0) LogData ("#_"+ticker+"_: "+"\U0001F4B8 За неделю заработано: "+RobotProfitWeek.ToString("F2")+" руб.*",Name);
 	RobotProfitWeek = 0;
 	flagMsgMonth = 1;
 	flagMsgWeek = 1;
@@ -136,7 +138,7 @@ if (BarDate().DayOfWeek < BarDate(-1-Interval+1).DayOfWeek && flagMsgWeek == 0 &
 else
 //Статистика работы выводится в начале дня
 if (BarDate() > BarDate(-1-Interval+1) && flagMsgDay == 0 && (BarTime() < AsTime(10, 20, 0)) && (BarTime() > AsTime(9, 55, 0))){
-	if (UseLog>0) LogData ("#_"+ticker+"_: "+"\U0001F4B8 За день заработано: *"+RobotProfitDay.ToString("F2")+" руб.*",Name);
+	if (UseLog>0) LogData ("#_"+ticker+"_: "+"\U0001F4B8 За день заработано: "+RobotProfitDay.ToString("F2")+" руб.*",Name);
 	RobotProfitDay = 0;
 	flagMsgMonth = 1;
 	flagMsgWeek = 1;
@@ -207,7 +209,7 @@ if (price ==0 || currBid ==0 || currAsk ==0) return;
 double pos = CurrentPosition();
 
 //После 18:00 не шортим и закрываем открытые шорты
-if ( (BarTime() > AsTime(18, 00, 0)) || (BarTime() <= AsTime(9, 55, 0)))
+/*if ( (BarTime() > AsTime(18, 00, 0)) || (BarTime() <= AsTime(9, 55, 0)))
 {
     if (pos<0) {
 	price = currAsk;
@@ -219,11 +221,8 @@ if ( (BarTime() > AsTime(18, 00, 0)) || (BarTime() <= AsTime(9, 55, 0)))
    	return;
   }
   if (OrderDirection == 1) return;//Стратегия шорт не работает до утра нового дня
-  if (xNewDirection == -1) xNewDirection = 1;
-
-
-  
-}
+  if (xNewDirection == -1) xNewDirection = 1;  
+}//*/
 
 
 //если перезапустили робота с ненулевой позицией робот должен подхватить сделку как первую в сетке
@@ -286,7 +285,7 @@ if (RobotProfit != rplac)
     RobotProfitWeek += profit;
     RobotProfitMonth += profit;
 
-    if (UseLog>0) LogData ("#_"+ticker+"_: "+"\U0001F4B0 Заработано: *"+RobotProfit.ToString("F2")+" руб. (+"+profit.ToString("F2")+((daysDiffFromStart>1)?( " за "+Convert.ToInt32(daysDiffFromStart).ToString()+" д." ):(""))+")*",Name);
+    if (UseLog>0) LogData ("#_"+ticker+"_: "+"\U0001F4B0 заработано: "+RobotProfit.ToString("F2")+" руб. (+"+profit.ToString("F2")+((daysDiffFromStart>1)?( " за "+Convert.ToInt32(daysDiffFromStart).ToString()+" д." ):(""))+")*",Name);
 }
 
 
@@ -308,7 +307,7 @@ if(activeOrder == null && pos ==0  && CalcProfit() > 0)
 	return;
 }
 
-LogData (BarDate().ToString()+" "+BarTime().ToString()+": "+"xNewDirection: "+xNewDirection.ToString()+"; "+"bid: "+currBid.ToString()+"; "+"ask: "+currAsk.ToString()+"; "+"pos: "+pos.ToString()+"; "+"CalcProfit(): "+CalcProfit().ToString()+"; "+"CalcPos(): "+CalcPos().ToString()+"; "+"CalcTP(): "+CalcTP().ToString()+"; ",Name);
+//LogData (BarDate().ToString()+" "+BarTime().ToString()+": "+"xNewDirection: "+xNewDirection.ToString()+"; "+"bid: "+currBid.ToString()+"; "+"ask: "+currAsk.ToString()+"; "+"pos: "+pos.ToString()+"; "+"CalcProfit(): "+CalcProfit().ToString()+"; "+"CalcPos(): "+CalcPos().ToString()+"; "+"CalcTP(): "+CalcTP().ToString()+"; ",Name);
 
 
 // *****************************************
@@ -442,17 +441,15 @@ price = pos>0 ? currBid : currAsk;
    	if (UseLog>0 && pos>0) LogData ("#_"+ticker+"_: "+"\U0001F4C8 Закрываем лонг"+((daysDiff>1)?( String.Format(" от {0:dd.MM.yyyy} {1}",BarDate(),BarTime()) ):(""))+": "+pos.ToString()+" шт. по "+price.ToString()+" руб.",Name); 
    	if (UseLog>0 && pos<0) LogData ("#_"+ticker+"_: "+"\U0001F4C9 Закрываем шорт"+((daysDiff>1)?( String.Format(" от {0:dd.MM.yyyy} {1}",BarDate(),BarTime()) ):(""))+": "+pos.ToString()+" шт. по "+price.ToString()+" руб.",Name); 
    	GridIsClosing = true;
-   	//GridIsOpen = false;
-   	//xNewPos = 0;
-	//xNewPrice = 0;
+   //GridIsOpen = false;
+   //	xNewPos = 0;
+//	xNewPrice = 0;
 
-	//MarginFlag = false;
-	//LimitFlag = false;//*/
+//	MarginFlag = false;
+//	LimitFlag = false;//*/
 			
-	//return;
+	return;
   }
-  
-  
 
 // *****************************************
 // *****************************************
@@ -464,9 +461,6 @@ price = pos>0 ? currBid : currAsk;
 double calcPosition = CalcPos();		
 if (pos == 0 && calcPosition>0 && CalcProfit()<=0) 
 {
-
-
-
   price = xNewDirection ==  1 ? currAsk : currBid;
   //считаем новый лот с заданным коэффициентом мультипликации
   double NewLot = calcPosition*PSM+StartLot-calcPosition;
@@ -492,7 +486,6 @@ if (pos == 0 && calcPosition>0 && CalcProfit()<=0)
   }
   
   //LogData ("LongLimit: "+LongLimit.ToString()+"; "+"ShortLimit: "+ShortLimit.ToString()+"; "+"NewLot: "+NewLot.ToString()+"; "+"xNewDirection: "+xNewDirection.ToString()+"; "+"bid: "+currBid.ToString()+"; "+"ask: "+currAsk.ToString()+"; "+"pos: "+pos.ToString()+"; "+"CalcProfit(): "+CalcProfit().ToString()+"; "+"CalcPos(): "+CalcPos().ToString()+"; "+"CalcTP(): "+CalcTP().ToString()+"; ",Name);
-
   //если хватает свободных денег то входим в сделку
   if (calcPosition + NewLot <= (xNewDirection == 1 ? LongLimit : Math.Abs(ShortLimit)))
   {     
@@ -514,7 +507,6 @@ if (pos == 0 && calcPosition>0 && CalcProfit()<=0)
     
     
     //LogData (CalcTP().ToString(),Name); 
-
         
     //запоминаем цену открытия и размер позиции в штуках
     GridIsClosing = false;
@@ -532,9 +524,6 @@ if (pos == 0 && calcPosition>0 && CalcProfit()<=0)
   }
 }
 	
-
-
-
 }
 
 
